@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+@theme {
+	--color-bg: #fff4d6;
+	--color-panel: #ffffff;
+	--color-line: #2b2250;
+	--color-btn: #ffffff;
+	--color-fg: #2b2250;
+	--color-muted: #6b6490;
+	--color-accent: #ff5fa2;
+	--color-ok: #0fa968;
+	--color-ng: #ff4d6d;
+	--color-ja: #7c3aed;
+	--font-sans:
+		"Zen Maru Gothic", -apple-system, "Hiragino Maru Gothic ProN",
+		"Hiragino Sans", sans-serif;
+	--font-mono: "M PLUS 1 Code", ui-monospace, "SF Mono", Menlo, monospace;
+	--shadow-pop: 4px 4px 0 var(--color-line);
+	--shadow-pop-sm: 2px 2px 0 var(--color-line);
+
+	--animate-shake-a: shake-a 0.12s;
+	--animate-shake-b: shake-b 0.12s;
+	--animate-pop: pop 1.8s ease-out forwards;
+	--animate-spark: spark 1s ease-out forwards;
+
+	/* 同じ揺れを2本用意し、キー誤入力のたびに切り替えてアニメを再発火させる */
+	@keyframes shake-a {
+		25% {
+			translate: -52% 0;
+		}
+		75% {
+			translate: -48% 0;
+		}
+	}
+	@keyframes shake-b {
+		25% {
+			translate: -52% 0;
+		}
+		75% {
+			translate: -48% 0;
+		}
+	}
+
+	/* ボーナス表示: ポンと弾んで現れ、しばらく見せてから消える */
+	@keyframes pop {
+		0% {
+			scale: 0.2;
+			rotate: -12deg;
+			opacity: 0;
+		}
+		15% {
+			scale: 1.35;
+			rotate: 4deg;
+			opacity: 1;
+		}
+		28% {
+			scale: 1;
+			rotate: -2deg;
+		}
+		80% {
+			scale: 1;
+			opacity: 1;
+		}
+		100% {
+			scale: 1.1;
+			opacity: 0;
+		}
+	}
+	/* きらめきが中心から --dx, --dy へ飛び散る */
+	@keyframes spark {
+		0% {
+			translate: 0 0;
+			scale: 0.3;
+			opacity: 1;
+		}
+		100% {
+			translate: var(--dx) var(--dy);
+			scale: 1.2;
+			opacity: 0;
+		}
+	}
+}
+
+body {
+	@apply min-h-screen bg-bg font-sans text-fg;
+	background-image:
+		radial-gradient(circle, #ffd166 2px, transparent 2.5px),
+		radial-gradient(circle, #ff9ec7 2px, transparent 2.5px);
+	background-size: 48px 48px;
+	background-position:
+		0 0,
+		24px 24px;
+}
