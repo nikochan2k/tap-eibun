@@ -5,6 +5,7 @@ import { btnSmall } from "./ui";
 
 const MAX_LIFE = 5;
 const CLEARED_VISIBLE_MS = 2800;
+const MISSED_VISIBLE_MS = 2200;
 /** クリア後の読み上げが終わるまで次へ進まない。止まった時のための待ち上限 */
 const CLEARED_SPEECH_WAIT_MAX_MS = 15000;
 
@@ -15,6 +16,9 @@ const SPAWN_INTERVAL = 0.8;
 
 /** 日本語訳を落下中に表示した時の得点の割合（倍率全体に掛ける） */
 const SHOW_JA_RATE = 0.7;
+
+/** 落下中に「もう一度聞く」を使うたび、倍率全体に掛ける割合 */
+const REPLAY_RATE = 0.85;
 
 /** 倍率ボーナス。倍率 = 1 + 各ボーナスの合計 */
 const COMBO_STEP = 0.1;
@@ -71,7 +75,7 @@ type Block = {
 	progress: number;
 };
 
-type Status = "playing" | "cleared";
+type Status = "playing" | "cleared" | "missed";
 
 type Round = {
 	sentence: Sentence;
@@ -86,6 +90,8 @@ type Round = {
 	status: Status;
 	until: number;
 	misses: number;
+	/** 「もう一度聞く」を使った回数 */
+	replays: number;
 	speed: number;
 	bonus?: Bonus;
 };
@@ -248,6 +254,7 @@ export function Game({
 	});
 	/** 画面のタップ処理をエンジンへ渡す */
 	const tapRef = useRef<(id: number) => void>(() => {});
+	const replayRef = useRef<() => void>(() => {});
 
 	const [view, setView] = useState<View | null>(null);
 	const [hud, setHud] = useState({
@@ -324,6 +331,7 @@ export function Game({
 				status: "playing",
 				until: 0,
 				misses: 0,
+				replays: 0,
 				speed: latest.current.speed,
 			};
 			publish();
@@ -342,7 +350,8 @@ export function Game({
 			const pace = (now - r.startedAt) / 1000 / par;
 			const mult =
 				multiplier(e.combo, r.misses === 0, pace, r.speed) *
-				(latest.current.showJa ? SHOW_JA_RATE : 1);
+				(latest.current.showJa ? SHOW_JA_RATE : 1) *
+				REPLAY_RATE ** r.replays;
 			const gain = Math.round(base * mult);
 			r.bonus = { gain, mult, combo: e.combo };
 			e.score += gain;
@@ -371,6 +380,13 @@ export function Game({
 			publish();
 		};
 		tapRef.current = tap;
+		replayRef.current = () => {
+			const r = e.round;
+			if (!r || e.ended || latest.current.paused) return;
+			// 落下中だけ減点。完成・失敗後に聞き直すのは自由
+			if (r.status === "playing") r.replays++;
+			speak(r.sentence.en);
+		};
 
 		const tick = (frameTime: number) => {
 			if (e.ended) return;
@@ -399,30 +415,36 @@ export function Game({
 					r.nextSpawn = now + (SPAWN_INTERVAL / spd) * 1000;
 					changed = true;
 				}
+				let fell = false;
 				for (const b of r.blocks) {
 					b.progress += dt / (FALL_SECONDS / spd);
-					if (b.progress >= 1) {
-						// 落ちたブロックはライフを1つ失って、上から出直す
-						b.progress = 0;
-						b.x = pickX(r.blocks);
-						e.combo = 0;
-						e.life--;
-						changed = true;
-						publishHud();
-						if (e.life <= 0) break;
-					}
+					if (b.progress >= 1) fell = true;
 				}
-				if (e.life <= 0) {
-					e.ended = true;
-					latest.current.onEnd({ score: e.score, clear: e.clear });
-					return;
+				if (fell) {
+					// 1つでも落ちたらこの文は失敗。ライフを1つ失って次の文へ
+					r.status = "missed";
+					r.until = now + MISSED_VISIBLE_MS;
+					r.blocks = [];
+					e.combo = 0;
+					e.life--;
+					publishHud();
+					changed = true;
 				}
 				if (changed) publish();
 			} else if (
 				now >= r.until &&
 				// クリア後の読み上げが終わるまで次の文を出さない
-				!(isSpeaking() && now < r.until + CLEARED_SPEECH_WAIT_MAX_MS)
+				!(
+					r.status === "cleared" &&
+					isSpeaking() &&
+					now < r.until + CLEARED_SPEECH_WAIT_MAX_MS
+				)
 			) {
+				if (e.life <= 0) {
+					e.ended = true;
+					latest.current.onEnd({ score: e.score, clear: e.clear });
+					return;
+				}
 				e.round = null;
 				e.nextRound = now + 400;
 				publish();
@@ -485,24 +507,32 @@ export function Game({
 				<span>
 					クリア: <b>{hud.clear}</b>
 				</span>
+				<button
+					type="button"
+					className={btnSmall}
+					disabled={!view}
+					onClick={() => replayRef.current()}
+				>
+					🔊 もう一度聞く
+				</button>
 				<b className="text-ng">
 					{"♥".repeat(hud.life) + "♡".repeat(MAX_LIFE - hud.life)}
 				</b>
 			</div>
 
 			<div className="flex min-h-12 items-center justify-center rounded-2xl border-2 border-line bg-white px-3 py-1.5 text-center text-base text-ja">
-				{view && (showJa || view.status === "cleared") && view.sentence.ja}
+				{view && (showJa || view.status !== "playing") && view.sentence.ja}
 			</div>
 
 			<div
-				className={`flex min-h-16 flex-wrap content-start items-center gap-x-2 gap-y-1 rounded-2xl border-2 px-3 py-2 font-mono text-lg font-semibold ${celebrated ? "border-line bg-[#fff3b0]" : view?.status === "cleared" ? "border-ok bg-[#e6fff3]" : "border-line bg-white"}`}
+				className={`flex min-h-16 flex-wrap content-start items-center gap-x-2 gap-y-1 rounded-2xl border-2 px-3 py-2 font-mono text-lg font-semibold ${celebrated ? "border-line bg-[#fff3b0]" : view?.status === "cleared" ? "border-ok bg-[#e6fff3]" : view?.status === "missed" ? "border-ng bg-[#ffe9ed]" : "border-line bg-white"}`}
 			>
 				{view?.words.map((w, i) =>
-					i < view.next ? (
+					i < view.next || view.status === "missed" ? (
 						<span
 							// biome-ignore lint/suspicious/noArrayIndexKey: 同じ単語が重複しうる固定の並び
 							key={i}
-							className="text-ok"
+							className={i < view.next ? "text-ok" : "text-muted"}
 						>
 							{w}
 						</span>
